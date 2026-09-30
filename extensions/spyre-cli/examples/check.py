@@ -27,34 +27,24 @@ from pathlib import Path
 import spyre_cli
 import torch
 from cases import EXAMPLES, RTOL
-
-REFERENCES = {
-    "add": torch.add,
-    "sub": torch.sub,
-    "mul": torch.mul,
-    "relu": torch.relu,
-    "exp": torch.exp,
-    "softmax": lambda a: torch.softmax(a, dim=-1),
-    "mm": torch.mm,
-}
+from references import DTYPES, expected, make_inputs
 
 
 def main():
     name = sys.argv[1]
-    in_shapes, out_shape, atol = EXAMPLES[name]
+    ex = EXAMPLES[name]
     path = Path(__file__).parent / name
 
-    torch.manual_seed(0)
-    inputs = [torch.randn(shape, dtype=torch.float16) for shape in in_shapes]
-    out = torch.empty(out_shape, dtype=torch.float16, device="spyre")
+    inputs = make_inputs(name)
+    out = torch.empty(ex.output, dtype=DTYPES[ex.dtype], device="spyre")
 
     runner = spyre_cli.launch(*[t.to("spyre") for t in inputs], out, path=path)
     got = out.cpu()
     del runner
 
-    expected = REFERENCES[name](*[t.float() for t in inputs]).half()
-    max_diff = (got.float() - expected.float()).abs().max().item()
-    ok = torch.allclose(got, expected, atol=atol, rtol=RTOL)
+    want = expected(name, inputs)
+    max_diff = (got.float() - want.float()).abs().max().item()
+    ok = torch.allclose(got, want, atol=ex.atol, rtol=RTOL)
     print(f"{name}: {'PASS' if ok else 'FAIL'} max|diff|={max_diff}")
     sys.exit(0 if ok else 1)
 
