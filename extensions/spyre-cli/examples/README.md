@@ -30,13 +30,29 @@ Tensors are fp16 unless noted. Run from this directory on a machine with a Spyre
 
 The CLI fills every input with ones, so e.g. `add` prints a tensor of 2s.
 
+## Testing
+
+`cases.py` is the registry of examples (shapes, dtype and tolerance) and
+`references.py` holds the op behind each one. `check.py <name>` launches one
+example through the SDK with random inputs and compares the result against
+CPU. `tests/test_examples.py` runs both `check.py` and the
+real `spyre launch` CLI for every example, each in a fresh process:
+
+```bash
+python3 -m pytest tests/test_examples.py -v
+```
+
+The tests skip themselves when no Spyre device is present.
+
 ## Caveats
 
 - The kernels are tied to the toolchain that built them (torch-spyre
   `e2028e39`, image `icr.io/ai_sw_accel/2.0/torch-spyre:latest` as of
   2026-09-30). If the runtime stops loading them, regenerate them on a Spyre
-  machine by compiling the same op with `torch.compile` and copying the one
-  kernel directory it writes under `$TORCHINDUCTOR_CACHE_DIR/inductor-spyre/`.
+  machine with `python3 generate.py [name ...]`, which compiles each example
+  with `torch.compile` and rejects any that produce more than one kernel.
+- To add an example, add an entry to `cases.py` and `references.py`, then run
+  `python3 generate.py <name>` and the tests.
 - spyre-cli allocates every tensor with the default device layout. A kernel
   compiled for any other layout gives wrong results with no error. For example
   `a.sum(dim=-1)` writes a `(512,)` output with `device_size=[1, 512, 64]`,
