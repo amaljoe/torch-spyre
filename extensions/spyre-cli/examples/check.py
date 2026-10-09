@@ -33,7 +33,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from examples import EXAMPLES, RTOL, cli_args, expected, make_inputs, torch_dtype
+from examples import EXAMPLES, cli_args, expected, make_inputs, torch_dtype
 
 DEVICE_ERRORS = ("RAS::", "StreamInErrorState", "DtException")
 
@@ -70,7 +70,7 @@ def check_sdk(name, path):
 
     want = expected(name, inputs)
     max_diff = (got.float() - want.float()).abs().max().item()
-    ok = torch.allclose(got, want, atol=ex.atol, rtol=RTOL)
+    ok = torch.allclose(got, want, atol=ex.atol, rtol=ex.rtol)
     return ok, f"max|diff|={max_diff}"
 
 

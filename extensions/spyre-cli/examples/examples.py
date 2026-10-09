@@ -46,44 +46,61 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_OUT = HERE / "build"
 
 
+# (atol, rtol), taken from the test of the same op in
+# tests/inductor/test_inductor_ops.py so the two suites agree:
+# compare_with_cpu's default, used by test_unary_op, test_binary_op,
+# test_dim_op_cpu_eager (softmax), test_mean_eager and test_mm_relaxed.
+DEFAULT_TOL = (0.1, 0.1)
+# The err of test_activation_fn (sigmoid, silu) and test_activation_cls (gelu).
+ACTIVATION_TOL = (0.01, 0.01)
+
+
 @dataclasses.dataclass(frozen=True)
 class Example:
     inputs: tuple  # input shapes, in kernel argument order
     output: tuple  # output shape
-    atol: float
+    tol: tuple = DEFAULT_TOL  # (atol, rtol) against the CPU reference
     dtype: str = "fp16"  # a spyre launch dtype: fp16, fp32 or bf16
-    init: str = "randn"  # "randn", or "positive" for ops like div
+    # "randn"; "positive" for ops like div; or "xavier", xavier_uniform_
+    # as in test_mm, which keeps a matmul's outputs near unit scale
+    init: str = "randn"
+
+    @property
+    def atol(self):
+        return self.tol[0]
+
+    @property
+    def rtol(self):
+        return self.tol[1]
 
 
 _M = (512, 1024)
 
 EXAMPLES = {
     # elementwise, binary
-    "add": Example((_M, _M), _M, 1e-2),
-    "sub": Example((_M, _M), _M, 1e-2),
-    "mul": Example((_M, _M), _M, 2e-2),
-    "div": Example(((256, 2048), (256, 2048)), (256, 2048), 2e-2, init="positive"),
+    "add": Example((_M, _M), _M),
+    "sub": Example((_M, _M), _M),
+    "mul": Example((_M, _M), _M),
+    "div": Example(((256, 2048), (256, 2048)), (256, 2048), init="positive"),
     # elementwise, unary
-    "relu": Example((_M,), _M, 1e-2),
-    "exp": Example((_M,), _M, 5e-2),
-    "sigmoid": Example((_M,), _M, 1e-2),
-    "gelu": Example((_M,), _M, 1e-2),
-    # fused multi-op
-    "fma": Example((_M, _M, _M), _M, 5e-2),
-    "swiglu": Example(((128, 4096), (128, 4096)), (128, 4096), 5e-2),
+    "relu": Example((_M,), _M),
+    "exp": Example((_M,), _M),
+    "sigmoid": Example((_M,), _M, ACTIVATION_TOL),
+    "gelu": Example((_M,), _M, ACTIVATION_TOL),
+    # fused multi-op, no dedicated torch-spyre test: pointwise, and silu
+    "fma": Example((_M, _M, _M), _M),
+    "swiglu": Example(((128, 4096), (128, 4096)), (128, 4096), ACTIVATION_TOL),
     # other dtypes and ranks
-    "add_fp32": Example((_M, _M), _M, 1e-4, dtype="fp32"),
-    "mul_bf16": Example((_M, _M), _M, 5e-2, dtype="bf16"),
-    "add_3d": Example(((4, 256, 512), (4, 256, 512)), (4, 256, 512), 1e-2),
+    "add_fp32": Example((_M, _M), _M, dtype="fp32"),
+    "mul_bf16": Example((_M, _M), _M, dtype="bf16"),
+    "add_3d": Example(((4, 256, 512), (4, 256, 512)), (4, 256, 512)),
     # reductions
-    "softmax": Example((_M,), _M, 1e-2),
-    "mean_keepdim": Example((_M,), (512, 1), 1e-2),
+    "softmax": Example((_M,), _M),
+    "mean_keepdim": Example((_M,), (512, 1)),
     # matmul
-    "mm": Example((_M, (1024, 256)), (512, 256), 1.0),
-    "bmm": Example(((8, 128, 256), (8, 256, 128)), (8, 128, 128), 1.0),
+    "mm": Example((_M, (1024, 256)), (512, 256), init="xavier"),
+    "bmm": Example(((8, 128, 256), (8, 256, 128)), (8, 128, 128)),
 }
-
-RTOL = 1e-2
 
 
 def tensor_spec(shape, dtype):
@@ -142,7 +159,10 @@ def make_inputs(name, seed=0):
     gen = torch.Generator().manual_seed(seed)
     inputs = []
     for shape in ex.inputs:
-        t = torch.randn(shape, generator=gen)
+        if ex.init == "xavier":
+            t = torch.nn.init.xavier_uniform_(torch.empty(shape), generator=gen)
+        else:
+            t = torch.randn(shape, generator=gen)
         if ex.init == "positive":
             t = t.abs() + 0.5
         inputs.append(t.to(torch_dtype(name)))
@@ -161,9 +181,8 @@ def _compile_one(name, out):
     inputs = make_inputs(name)
     fn = torch.compile(references()[name], backend="inductor")
     got = fn(*[t.to("spyre") for t in inputs]).cpu()
-    if not torch.allclose(
-        got, expected(name, inputs), atol=EXAMPLES[name].atol, rtol=RTOL
-    ):
+    ex = EXAMPLES[name]
+    if not torch.allclose(got, expected(name, inputs), atol=ex.atol, rtol=ex.rtol):
         sys.exit(f"{name}: torch.compile result does not match CPU")
 
     cache = os.environ["TORCHINDUCTOR_CACHE_DIR"]

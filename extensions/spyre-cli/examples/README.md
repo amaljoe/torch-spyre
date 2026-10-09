@@ -43,7 +43,8 @@ The CLI fills every input with ones, so e.g. `add` prints a tensor of 2s.
 
 ## Testing
 
-`examples.py` holds the registry of examples (shapes, dtype and tolerance)
+`examples.py` holds the registry of examples (shapes, dtype and tolerance,
+the latter taken from the matching test in `tests/inductor/test_inductor_ops.py`)
 and the op behind each one. `check.py <name> [dir]` runs one built example
 through both pathways: `spyre launch` must exit 0 with no device error, and
 the SDK, given random inputs, must match the CPU reference.
