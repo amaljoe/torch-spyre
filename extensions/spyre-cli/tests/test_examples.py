@@ -15,14 +15,13 @@
 
 """Integration tests: compile every example and run it on a Spyre device.
 
-Kernels are compiled once per session with examples/generate.py on the
-current toolchain, then each one is launched through the SDK (check.py) and
-the spyre launch CLI. Every compile and launch runs in its own process, since
-a device fault poisons the stream for the rest of the process it happens in.
-Skipped when no device is present.
+Kernels are compiled once per session by examples/examples.py on the current
+toolchain. Each example is then checked by examples/check.py, which launches it
+through both the spyre launch CLI and the SDK. Every compile and check runs in
+its own process, since a device fault poisons the stream for the rest of the
+process it happens in. Skipped when no device is present.
 """
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,9 +31,7 @@ import pytest
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 sys.path.insert(0, str(EXAMPLES_DIR))
 
-from cases import EXAMPLES, cli_args  # noqa: E402
-
-DEVICE_ERRORS = ("RAS::", "StreamInErrorState", "DtException")
+from examples import EXAMPLES  # noqa: E402
 
 
 def _spyre_available():
@@ -55,7 +52,7 @@ def _spyre_available():
 pytestmark = pytest.mark.skipif(not _spyre_available(), reason="needs a Spyre device")
 
 
-def _run(cmd, timeout=600):
+def _run(cmd, timeout):
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -69,35 +66,18 @@ def _run(cmd, timeout=600):
 
 @pytest.fixture(scope="session")
 def kernels(tmp_path_factory):
-    """Compile every example once; return (output dir, generate.py output)."""
+    """Compile every example once; return (output dir, compile output)."""
     out = tmp_path_factory.mktemp("kernels")
-    cmd = [sys.executable, "generate.py", "--out", str(out)]
-    _, output = _run(cmd, timeout=60 * 60)
+    _, output = _run([sys.executable, "examples.py", "--out", str(out)], 60 * 60)
     return out, output
 
 
-def _kernel_dir(kernels, name):
-    out, output = kernels
+@pytest.mark.parametrize("name", sorted(EXAMPLES))
+def test_example(kernels, name):
+    out, compile_output = kernels
     path = out / name
     if not (path / "spyreCodeDir").is_dir():
-        lines = [line for line in output.splitlines() if name in line]
-        pytest.fail(f"generate.py did not build {name}:\n" + "\n".join(lines))
-    return path
-
-
-@pytest.mark.parametrize("name", sorted(EXAMPLES))
-def test_example_matches_cpu(kernels, name):
-    path = _kernel_dir(kernels, name)
-    result, output = _run([sys.executable, "check.py", name, str(path)])
+        lines = [line for line in compile_output.splitlines() if name in line]
+        pytest.fail(f"examples.py did not build {name}:\n" + "\n".join(lines))
+    result, output = _run([sys.executable, "check.py", name, str(path)], 1200)
     assert result.returncode == 0, output
-
-
-@pytest.mark.parametrize("name", sorted(EXAMPLES))
-def test_example_cli_launch(kernels, name):
-    spyre = shutil.which("spyre")
-    if spyre is None:
-        pytest.skip("spyre CLI not installed")
-    path = _kernel_dir(kernels, name)
-    result, output = _run([spyre, "launch", *cli_args(name), str(path)])
-    assert result.returncode == 0, output
-    assert not any(err in output for err in DEVICE_ERRORS), output

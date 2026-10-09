@@ -7,11 +7,11 @@ the toolchain that built it.
 On a machine with a Spyre card, build them first, from this directory:
 
 ```bash
-python3 generate.py            # all examples, into build/
-python3 generate.py add mm     # or just some
+python3 examples.py            # all examples, into build/
+python3 examples.py add mm     # or just some
 ```
 
-`generate.py` compiles each op with `torch.compile(fn, backend="inductor")`,
+`examples.py` compiles each op with `torch.compile(fn, backend="inductor")`,
 checks the result against CPU, and copies the one kernel directory it produces
 to `build/<name>`. That directory holds the SDSC bundle (`bundle.mlir`,
 `sdsc_*.json`) and `spyreCodeDir/`, which is what `spyre launch` loads. Ops that
@@ -43,19 +43,19 @@ The CLI fills every input with ones, so e.g. `add` prints a tensor of 2s.
 
 ## Testing
 
-`cases.py` is the registry of examples (shapes, dtype and tolerance) and
-`references.py` holds the op behind each one. `check.py <name> [dir]`
-launches one built example through the SDK with random inputs and compares the
-result against CPU. `tests/test_examples.py` builds every example once into a
-temporary directory, then runs both `check.py` and the real `spyre launch` CLI
-for each, every step in a fresh process:
+`examples.py` holds the registry of examples (shapes, dtype and tolerance)
+and the op behind each one. `check.py <name> [dir]` runs one built example
+through both pathways: `spyre launch` must exit 0 with no device error, and
+the SDK, given random inputs, must match the CPU reference.
+`tests/test_examples.py` builds every example once into a temporary directory,
+then runs `check.py` for each, every step in a fresh process:
 
 ```bash
 python3 -m pytest tests/test_examples.py -v
 ```
 
 The tests skip themselves when no Spyre device is present. To add an example,
-add an entry to `cases.py` and `references.py`.
+add an entry to `EXAMPLES` and `references()` in `examples.py`.
 
 ## Limitations
 
